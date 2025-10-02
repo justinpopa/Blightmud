@@ -502,6 +502,9 @@ pub fn spawn_input_thread(session: Session) -> thread::JoinHandle<()> {
                             }
                         }
                         CrosstermEvent::Mouse(event) => parse_mouse_event(event, &writer),
+                        CrosstermEvent::Resize(_, _) => {
+                            writer.send(crate::event::Event::Redraw).ok();
+                        }
                         _ => {}
                     }
                 }

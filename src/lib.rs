@@ -7,7 +7,7 @@ use log::{error, info};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::{env, fs, thread, time};
+use std::{env, fs, time};
 pub use tools::register_panic_hook;
 use ui::HelpHandler;
 
@@ -94,20 +94,7 @@ lazy_static! {
         PathBuf::from(expand_tilde("~/Library/Application Support/blightmud").as_ref());
 }
 
-fn register_terminal_resize_listener(session: Session) -> thread::JoinHandle<()> {
-    let mut signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGWINCH]).unwrap();
-    let main_thread_writer = session.main_writer;
-    thread::Builder::new()
-        .name("signal-thread".to_string())
-        .spawn(move || {
-            for _ in signals.forever() {
-                if let Err(err) = main_thread_writer.send(Event::Redraw) {
-                    error!("Resize listener failed: {}", err);
-                }
-            }
-        })
-        .unwrap()
-}
+// Terminal resize is now handled by crossterm's Event::Resize in command.rs
 
 fn start_logging(log_level: log::LevelFilter) -> std::io::Result<()> {
     let log_level = if cfg!(debug_assertions) {
@@ -257,7 +244,7 @@ fn run(main_thread_read: Receiver<Event>, mut session: Session, rt: RuntimeConfi
     screen.setup()?;
 
     let _ = spawn_input_thread(session.clone());
-    let _ = register_terminal_resize_listener(session.clone());
+    // Terminal resize is now handled by crossterm's Event::Resize
 
     let lua_scripts = if !rt.integration_test {
         fs::read_dir(CONFIG_DIR.as_path())?
