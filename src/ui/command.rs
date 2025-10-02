@@ -7,7 +7,7 @@ use rs_complete::CompletionTree;
 use std::collections::HashSet;
 use std::thread;
 use std::sync::{mpsc::Sender, Arc, Mutex};
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 
 #[derive(Default)]
 struct CompletionStepData {
@@ -469,6 +469,10 @@ pub fn spawn_input_thread(session: Session) -> thread::JoinHandle<()> {
                 if let Ok(evt) = event::read() {
                     match evt {
                         CrosstermEvent::Key(key) => {
+                            // Only handle key press events, not release/repeat
+                            if key.kind != KeyEventKind::Press {
+                                continue;
+                            }
                             if let Ok(mut buffer) = buffer.lock() {
                                 let orig_pos = buffer.get_pos();
                                 let orig_len = buffer.buffer.len();
