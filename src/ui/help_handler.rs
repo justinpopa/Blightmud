@@ -67,7 +67,8 @@ impl HelpHandler {
         let parser = Parser::new_ext(file_content, options);
 
         // Useless as files are embedded into binary.
-        let base_dir = Path::new("/");
+        // Use current directory as base for markdown rendering (cross-platform)
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
         let mut md_bytes = vec![];
         let env = pulldown_cmark_mdcat::Environment::for_local_directory(&base_dir).unwrap();
