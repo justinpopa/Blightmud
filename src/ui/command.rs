@@ -1,16 +1,13 @@
 use crate::event::QuitMethod;
 use crate::model::{Completions, Line, PromptMask, Servers};
-use crate::{event::Event, tts::TTSController};
+use crate::tts::TTSController;
 use crate::{lua::LuaScript, lua::UiEvent, session::Session, SaveData};
 use log::debug;
 use rs_complete::CompletionTree;
 use std::collections::HashSet;
 use std::thread;
-use std::{
-    io::stdin,
-    sync::{mpsc::Sender, Arc, Mutex},
-};
-use termion::{event::Key, input::TermRead};
+use std::sync::{mpsc::Sender, Arc, Mutex};
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 #[derive(Default)]
 struct CompletionStepData {
@@ -262,48 +259,53 @@ impl CommandBuffer {
     }
 }
 
-fn parse_mouse_event(event: termion::event::MouseEvent, writer: &Sender<Event>) {
-    use termion::event::{MouseButton, MouseEvent};
-    match event {
-        MouseEvent::Press(MouseButton::WheelUp, ..) => writer.send(Event::ScrollUp).unwrap(),
-        MouseEvent::Press(MouseButton::WheelDown, ..) => writer.send(Event::ScrollDown).unwrap(),
+fn parse_mouse_event(event: MouseEvent, writer: &Sender<crate::event::Event>) {
+    match event.kind {
+        MouseEventKind::ScrollUp => writer.send(crate::event::Event::ScrollUp).unwrap(),
+        MouseEventKind::ScrollDown => writer.send(crate::event::Event::ScrollDown).unwrap(),
         _ => {}
     }
 }
 
 fn parse_key_event(
-    key: termion::event::Key,
+    key: KeyEvent,
     buffer: &mut CommandBuffer,
-    writer: &Sender<Event>,
+    writer: &Sender<crate::event::Event>,
     tts_ctrl: &mut Arc<Mutex<TTSController>>,
     script: &mut Arc<Mutex<LuaScript>>,
 ) {
-    match key {
-        Key::Char('\n') => {
+    match key.code {
+        KeyCode::Enter => {
             let mut line = Line::from(buffer.submit());
             line.flags.source = Some("user".to_string());
-            writer.send(Event::ServerInput(line)).unwrap();
+            writer.send(crate::event::Event::ServerInput(line)).unwrap();
             if let Ok(mut script) = script.lock() {
                 script.set_prompt_content(String::new(), 0);
             }
         }
-        Key::Char('\t') => buffer.tab_complete(),
-        Key::Char(c) => {
+        KeyCode::Tab => buffer.tab_complete(),
+
+        // Handle modified keys BEFORE generic Char to prevent them from being typed
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            writer.send(crate::event::Event::Redraw).unwrap()
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            writer.send(crate::event::Event::Quit(QuitMethod::CtrlC)).unwrap();
+        }
+
+        // Generic character input (no modifiers or handled by bindings)
+        KeyCode::Char(c) => {
             tts_ctrl.lock().unwrap().key_press(c);
             buffer.push_key(c);
             if let Ok(mut script) = script.lock() {
                 script.set_prompt_content(buffer.get_buffer(), buffer.get_pos());
             }
         }
-        Key::Ctrl('l') => writer.send(Event::Redraw).unwrap(),
-        Key::Ctrl('c') => {
-            writer.send(Event::Quit(QuitMethod::CtrlC)).unwrap();
-        }
 
         // Input navigation
-        Key::Left => buffer.step_left(),
-        Key::Right => buffer.step_right(),
-        Key::Backspace => {
+        KeyCode::Left => buffer.step_left(),
+        KeyCode::Right => buffer.step_right(),
+        KeyCode::Backspace => {
             if let Some(c) = buffer.remove() {
                 if let Ok(mut tts_ctrl) = tts_ctrl.lock() {
                     tts_ctrl.key_press(c);
@@ -313,31 +315,84 @@ fn parse_key_event(
                 script.set_prompt_content(buffer.get_buffer(), buffer.get_pos());
             }
         }
-        Key::Delete => buffer.delete_right(),
+        KeyCode::Delete => buffer.delete_right(),
         _ => {}
     };
 }
 
 fn check_command_binds(
-    cmd: termion::event::Key,
+    cmd: KeyEvent,
     buffer: &mut CommandBuffer,
     script: &Arc<Mutex<LuaScript>>,
-    writer: &Sender<Event>,
+    writer: &Sender<crate::event::Event>,
 ) -> bool {
     let mut ran = false;
     if let Ok(mut script) = script.lock() {
-        ran = match cmd {
-            Key::Ctrl(c) => script.check_bindings(&human_key("ctrl-", c)),
-            Key::Alt(c) => script.check_bindings(&human_key("alt-", c)),
-            Key::F(n) => script.check_bindings(&format!("f{n}")),
-            Key::PageUp => script.check_bindings("pageup") || script.check_bindings("page up"),
-            Key::PageDown => {
+        ran = match (cmd.code, cmd.modifiers) {
+            (KeyCode::Char(c), m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings(&human_key("ctrl-", c))
+            }
+            (KeyCode::Char(c), m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings(&human_key("alt-", c))
+            }
+            (KeyCode::F(n), _) => script.check_bindings(&format!("f{n}")),
+            (KeyCode::PageUp, _) => script.check_bindings("pageup") || script.check_bindings("page up"),
+            (KeyCode::PageDown, _) => {
                 script.check_bindings("pagedown") || script.check_bindings("page down")
             }
-            Key::Home => script.check_bindings("home"),
-            Key::End => script.check_bindings("end"),
-            Key::Up => script.check_bindings("up"),
-            Key::Down => script.check_bindings("down"),
+            (KeyCode::Home, _) => script.check_bindings("home"),
+            (KeyCode::End, _) => script.check_bindings("end"),
+            (KeyCode::Up, _) => script.check_bindings("up"),
+            (KeyCode::Down, _) => script.check_bindings("down"),
+            // DECKPAM keypad keys with modifiers
+            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_0"),
+            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_1"),
+            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_2"),
+            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_3"),
+            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_4"),
+            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_5"),
+            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_6"),
+            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_7"),
+            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_8"),
+            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_9"),
+            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_0"),
+            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_1"),
+            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_2"),
+            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_3"),
+            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_4"),
+            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_5"),
+            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_6"),
+            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_7"),
+            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_8"),
+            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_9"),
+            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_0"),
+            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_1"),
+            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_2"),
+            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_3"),
+            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_4"),
+            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_5"),
+            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_6"),
+            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_7"),
+            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_8"),
+            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_9"),
+            // Unmodified keypad keys
+            (KeyCode::Keypad0, _) => script.check_bindings("kp_0"),
+            (KeyCode::Keypad1, _) => script.check_bindings("kp_1"),
+            (KeyCode::Keypad2, _) => script.check_bindings("kp_2"),
+            (KeyCode::Keypad3, _) => script.check_bindings("kp_3"),
+            (KeyCode::Keypad4, _) => script.check_bindings("kp_4"),
+            (KeyCode::Keypad5, _) => script.check_bindings("kp_5"),
+            (KeyCode::Keypad6, _) => script.check_bindings("kp_6"),
+            (KeyCode::Keypad7, _) => script.check_bindings("kp_7"),
+            (KeyCode::Keypad8, _) => script.check_bindings("kp_8"),
+            (KeyCode::Keypad9, _) => script.check_bindings("kp_9"),
+            (KeyCode::KeypadMultiply, _) => script.check_bindings("kp_multiply"),
+            (KeyCode::KeypadPlus, _) => script.check_bindings("kp_plus"),
+            (KeyCode::KeypadMinus, _) => script.check_bindings("kp_minus"),
+            (KeyCode::KeypadDivide, _) => script.check_bindings("kp_divide"),
+            (KeyCode::KeypadPeriod, _) => script.check_bindings("kp_period"),
+            (KeyCode::KeypadEqual, _) => script.check_bindings("kp_equal"),
+            (KeyCode::KeypadEnter, _) => script.check_bindings("kp_enter"),
             _ => false,
         }
     }
@@ -356,32 +411,10 @@ fn human_key(prefix: &str, c: char) -> String {
     out
 }
 
-fn check_escape_bindings(
-    escape: &str,
-    buffer: &mut CommandBuffer,
-    script: &Arc<Mutex<LuaScript>>,
-    writer: &Sender<Event>,
-) {
-    if let Ok(mut script) = script.lock() {
-        if !script.check_bindings(&escape.to_lowercase()) {
-            writer
-                .send(Event::Info(format!("Unknown command: {escape:?}")))
-                .unwrap();
-        }
-    }
-    handle_script_ui_io(buffer, script, writer);
-    writer
-        .send(Event::UserInputBuffer(
-            buffer.get_buffer(),
-            buffer.get_pos(),
-        ))
-        .unwrap();
-}
-
 fn handle_script_ui_io(
     buffer: &mut CommandBuffer,
     script: &Arc<Mutex<LuaScript>>,
-    writer: &Sender<Event>,
+    writer: &Sender<crate::event::Event>,
 ) {
     if let Ok(mut script) = script.lock() {
         script.get_ui_events().iter().for_each(|event| match event {
@@ -399,16 +432,16 @@ fn handle_script_ui_io(
             UiEvent::DeleteWordLeft => buffer.delete_word_left(),
             UiEvent::DeleteWordRight => buffer.delete_word_right(),
             UiEvent::DeleteRight => buffer.delete_right(),
-            UiEvent::ScrollDown => writer.send(Event::ScrollDown).unwrap(),
-            UiEvent::ScrollUp => writer.send(Event::ScrollUp).unwrap(),
-            UiEvent::ScrollTop => writer.send(Event::ScrollTop).unwrap(),
-            UiEvent::ScrollBottom => writer.send(Event::ScrollBottom).unwrap(),
+            UiEvent::ScrollDown => writer.send(crate::event::Event::ScrollDown).unwrap(),
+            UiEvent::ScrollUp => writer.send(crate::event::Event::ScrollUp).unwrap(),
+            UiEvent::ScrollTop => writer.send(crate::event::Event::ScrollTop).unwrap(),
+            UiEvent::ScrollBottom => writer.send(crate::event::Event::ScrollBottom).unwrap(),
             UiEvent::Complete => buffer.tab_complete(),
             UiEvent::Unknown(_) => {}
         });
         script.set_prompt_content(buffer.get_buffer(), buffer.get_pos());
         script.get_output_lines().iter().for_each(|l| {
-            writer.send(Event::Output(Line::from(l))).unwrap();
+            writer.send(crate::event::Event::Output(Line::from(l))).unwrap();
         });
     }
 }
@@ -420,7 +453,6 @@ pub fn spawn_input_thread(session: Session) -> thread::JoinHandle<()> {
             debug!("Input stream spawned");
             let writer = session.main_writer.clone();
             let mut script = session.lua_script.clone();
-            let stdin = stdin();
             let buffer = session.command_buffer.clone();
             let mut tts_ctrl = session.tts_ctrl;
 
@@ -433,57 +465,44 @@ pub fn spawn_input_thread(session: Session) -> thread::JoinHandle<()> {
                     .insert(include_str!("../../resources/completions.txt"));
             }
 
-            for e in stdin.events() {
-                match e.unwrap() {
-                    termion::event::Event::Key(key) => {
-                        if let Ok(mut buffer) = buffer.lock() {
-                            let orig_pos = buffer.get_pos();
-                            let orig_len = buffer.buffer.len();
-                            let bind_ran = check_command_binds(key, &mut buffer, &script, &writer);
-                            if !bind_ran {
-                                parse_key_event(
-                                    key,
-                                    &mut buffer,
-                                    &writer,
-                                    &mut tts_ctrl,
-                                    &mut script,
-                                );
-                            }
-                            if orig_len == buffer.buffer.len() && orig_pos != buffer.get_pos() {
-                                writer
-                                    .send(Event::UserInputCursor(buffer.get_pos()))
-                                    .unwrap();
-                            } else if !bind_ran || orig_len != buffer.buffer.len() {
-                                if let Ok(mut luascript) = script.lock() {
-                                    luascript.set_prompt_mask_content(&buffer.prompt_mask);
-                                    luascript
-                                        .set_prompt_content(buffer.get_buffer(), buffer.get_pos());
-                                }
-                                writer
-                                    .send(Event::UserInputBuffer(
-                                        buffer.get_buffer(),
-                                        buffer.get_pos(),
-                                    ))
-                                    .unwrap();
-                            }
-                        }
-                    }
-                    termion::event::Event::Mouse(event) => parse_mouse_event(event, &writer),
-                    termion::event::Event::Unsupported(bytes) => {
-                        if let Ok(escape) = String::from_utf8(bytes.clone()) {
+            loop {
+                if let Ok(evt) = event::read() {
+                    match evt {
+                        CrosstermEvent::Key(key) => {
                             if let Ok(mut buffer) = buffer.lock() {
-                                check_escape_bindings(
-                                    &escape.to_lowercase(),
-                                    &mut buffer,
-                                    &script,
-                                    &writer,
-                                );
+                                let orig_pos = buffer.get_pos();
+                                let orig_len = buffer.buffer.len();
+                                let bind_ran = check_command_binds(key, &mut buffer, &script, &writer);
+                                if !bind_ran {
+                                    parse_key_event(
+                                        key,
+                                        &mut buffer,
+                                        &writer,
+                                        &mut tts_ctrl,
+                                        &mut script,
+                                    );
+                                }
+                                if orig_len == buffer.buffer.len() && orig_pos != buffer.get_pos() {
+                                    writer
+                                        .send(crate::event::Event::UserInputCursor(buffer.get_pos()))
+                                        .unwrap();
+                                } else if !bind_ran || orig_len != buffer.buffer.len() {
+                                    if let Ok(mut luascript) = script.lock() {
+                                        luascript.set_prompt_mask_content(&buffer.prompt_mask);
+                                        luascript
+                                            .set_prompt_content(buffer.get_buffer(), buffer.get_pos());
+                                    }
+                                    writer
+                                        .send(crate::event::Event::UserInputBuffer(
+                                            buffer.get_buffer(),
+                                            buffer.get_pos(),
+                                        ))
+                                        .unwrap();
+                                }
                             }
-                        } else {
-                            writer
-                                .send(Event::Info(format!("Unknown command: {bytes:?}")))
-                                .unwrap();
                         }
+                        CrosstermEvent::Mouse(event) => parse_mouse_event(event, &writer),
+                        _ => {}
                     }
                 }
             }
@@ -498,16 +517,20 @@ mod command_test {
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::{Arc, Mutex};
 
-    use termion::event::Key;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::check_command_binds;
     use super::CommandBuffer;
     use crate::lua::LuaScriptBuilder;
     use crate::tts::TTSController;
-    use crate::Event;
+    use crate::event::Event;
 
     fn push_string(buffer: &mut CommandBuffer, msg: &str) {
         msg.chars().for_each(|c| buffer.push_key(c));
+    }
+
+    fn key_event(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
     }
 
     fn get_command() -> (CommandBuffer, Receiver<Event>) {
@@ -724,83 +747,83 @@ mod command_test {
         let mut buffer = CommandBuffer::new(tts, script.clone());
 
         assert!(check_command_binds(
-            Key::Alt('b'),
+            key_event(KeyCode::Char('b'), KeyModifiers::ALT),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Alt('f'),
+            key_event(KeyCode::Char('f'), KeyModifiers::ALT),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Alt('d'),
+            key_event(KeyCode::Char('d'), KeyModifiers::ALT),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Alt('\u{7f}'),
+            key_event(KeyCode::Char('\u{7f}'), KeyModifiers::ALT),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('a'),
+            key_event(KeyCode::Char('a'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('b'),
+            key_event(KeyCode::Char('b'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('e'),
+            key_event(KeyCode::Char('e'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('f'),
+            key_event(KeyCode::Char('f'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('d'),
+            key_event(KeyCode::Char('d'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('h'),
+            key_event(KeyCode::Char('h'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('k'),
+            key_event(KeyCode::Char('k'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
         assert!(check_command_binds(
-            Key::Ctrl('u'),
+            key_event(KeyCode::Char('u'), KeyModifiers::CONTROL),
             &mut buffer,
             &script,
             &tx
         ));
 
-        assert!(check_command_binds(Key::Home, &mut buffer, &script, &tx));
-        assert!(check_command_binds(Key::End, &mut buffer, &script, &tx));
-        assert!(check_command_binds(Key::PageUp, &mut buffer, &script, &tx));
+        assert!(check_command_binds(key_event(KeyCode::Home, KeyModifiers::NONE), &mut buffer, &script, &tx));
+        assert!(check_command_binds(key_event(KeyCode::End, KeyModifiers::NONE), &mut buffer, &script, &tx));
+        assert!(check_command_binds(key_event(KeyCode::PageUp, KeyModifiers::NONE), &mut buffer, &script, &tx));
         assert!(check_command_binds(
-            Key::PageDown,
+            key_event(KeyCode::PageDown, KeyModifiers::NONE),
             &mut buffer,
             &script,
             &tx

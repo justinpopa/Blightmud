@@ -12,16 +12,21 @@ use crate::{
 
 use super::{history::History, HeadlessScreen, ReaderScreen, SplitScreen, UserInterface};
 use anyhow::Result;
-use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
+use crossterm::{
+    terminal::{enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    event::{EnableMouseCapture, DisableMouseCapture},
+    execute,
+};
 
 /// Creates the io::Write terminal handler we draw to.
 fn create_screen_writer(mouse_support: bool) -> Result<Box<dyn Write>> {
-    let screen = stdout().into_raw_mode()?.into_alternate_screen()?;
+    enable_raw_mode()?;
+    let mut screen = stdout();
+    execute!(screen, EnterAlternateScreen)?;
     if mouse_support {
-        Ok(Box::new(MouseTerminal::from(screen)))
-    } else {
-        Ok(Box::new(screen))
+        execute!(screen, EnableMouseCapture)?;
     }
+    Ok(Box::new(screen))
 }
 
 pub struct UiWrapper {
@@ -184,6 +189,13 @@ impl UserInterface for UiWrapper {
     }
 
     fn destroy(self: Box<Self>) -> Result<(Box<dyn Write>, History)> {
+        // Cleanup crossterm state before destroying
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            std::io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
         self.screen.destroy()
     }
 }

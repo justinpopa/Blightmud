@@ -8,10 +8,23 @@ use crate::{model::Line, model::Regex, ui::ansi::*, ui::printable_chars::Printab
 use anyhow::Result;
 use std::collections::HashSet;
 use std::io::Write;
-use termion::color::{self, Bg, Fg};
-use termion::cursor;
+use crossterm::{
+    cursor,
+    style::{Attribute, Color, Colored, SetAttribute, SetBackgroundColor, SetForegroundColor},
+    terminal::{size, Clear, ClearType},
+    QueueableCommand,
+};
 
 use super::UserInterface;
+
+// Helper functions to generate ANSI color codes for embedded text (used in format strings that get wrapped)
+fn ansi_fg(color: Color) -> String {
+    format!("\x1b[{}m", Colored::ForegroundColor(color))
+}
+
+fn ansi_bg(color: Color) -> String {
+    format!("\x1b[{}m", Colored::BackgroundColor(color))
+}
 
 const SCROLL_LIVE_BUFFER_SIZE: u16 = 10;
 const PROMPT_HEIGHT: u16 = 1;
@@ -110,20 +123,17 @@ impl StatusArea {
     }
 
     fn draw_bar(&self, line: usize, screen: &mut impl Write, custom_info: &str) -> Result<()> {
-        write!(
-            screen,
-            "{}{}{}",
-            termion::cursor::Goto(1, line as u16),
-            termion::clear::CurrentLine,
-            Fg(color::Green),
-        )?;
+        screen.queue(cursor::MoveTo(0, line as u16 - 1))?;
+        screen.queue(Clear(ClearType::CurrentLine))?;
+        screen.queue(SetForegroundColor(Color::Green))?;
+        write!(screen, "")?;
 
         let custom_info = if !custom_info.trim().is_empty() {
             format!(
-                "━ {}{}{} ",
+                "━ {}{}{}",
                 custom_info.trim(),
-                Fg(color::Reset),
-                Fg(color::Green)
+                ansi_fg(Color::Reset),
+                ansi_fg(Color::Green)
             )
         } else {
             "".to_string()
@@ -138,17 +148,13 @@ impl StatusArea {
             &custom_info,
             self.width as usize + stripped_chars
         )?; // Print separator
-        write!(screen, "{}", Fg(color::Reset))?;
+        screen.queue(SetForegroundColor(Color::Reset))?;
         Ok(())
     }
 
     fn draw_line(&self, line: usize, screen: &mut impl Write, info: &str) -> Result<()> {
-        write!(
-            screen,
-            "{}{}",
-            termion::cursor::Goto(1, line as u16),
-            termion::clear::CurrentLine,
-        )?;
+        screen.queue(cursor::MoveTo(0, line as u16 - 1))?;
+        screen.queue(Clear(ClearType::CurrentLine))?;
 
         write!(screen, "{info}")?; // Print separator
         Ok(())
@@ -185,7 +191,7 @@ impl UserInterface for SplitScreen {
         let settings = Settings::try_load()?;
 
         // Get params in case screen resized
-        let (width, height) = termion::terminal_size()?;
+        let (width, height) = size()?;
         if width > 0 && height > 0 {
             self.width = width;
             self.height = height;
@@ -205,12 +211,8 @@ impl UserInterface for SplitScreen {
             self.reset_scroll()?;
             self.redraw_status_area()?;
             self.screen.flush()?;
-            write!(
-                self.screen,
-                "{}{}",
-                termion::cursor::Goto(1, self.output_start_line),
-                termion::cursor::Save
-            )?;
+            self.screen.queue(cursor::MoveTo(0, self.output_start_line - 1))?;
+            self.screen.queue(cursor::SavePosition)?;
             Ok(())
         } else {
             Err(TerminalSizeError.into())
@@ -218,8 +220,10 @@ impl UserInterface for SplitScreen {
     }
 
     fn print_error(&mut self, output: &str) {
-        let line = &format!("{}[!!] {}{}", Fg(color::Red), output, Fg(color::Reset));
+        let _ = self.screen.queue(SetForegroundColor(Color::Red));
+        let line = &format!("[!!] {}", output);
         self.print_line(line);
+        let _ = self.screen.queue(SetForegroundColor(Color::Reset));
     }
 
     fn print_info(&mut self, output: &str) {
@@ -276,20 +280,15 @@ impl UserInterface for SplitScreen {
             }
         }
         self.cursor_prompt_pos = pos as u16 + 1;
-        write!(
-            self.screen,
-            "{}{}{}{}{}{}{}{}{}",
-            termion::cursor::Save,
-            termion::cursor::Goto(1, self.prompt_line),
-            Fg(termion::color::Reset),
-            Bg(termion::color::Reset),
-            termion::style::Reset,
-            termion::clear::CurrentLine,
-            input,
-            termion::cursor::Restore,
-            self.goto_prompt(),
-        )
-        .unwrap();
+        self.screen.queue(cursor::SavePosition).unwrap();
+        self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1)).unwrap();
+        self.screen.queue(SetForegroundColor(Color::Reset)).unwrap();
+        self.screen.queue(SetBackgroundColor(Color::Reset)).unwrap();
+        self.screen.queue(SetAttribute(Attribute::Reset)).unwrap();
+        self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
+        write!(self.screen, "{}", input).unwrap();
+        self.screen.queue(cursor::RestorePosition).unwrap();
+        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
     }
 
     fn print_send(&mut self, send: &Line) {
@@ -299,10 +298,10 @@ impl UserInterface for SplitScreen {
         if let Some(line) = send.print_line() {
             let line = &format!(
                 "{}{}> {}{}",
-                termion::style::Reset,
-                Fg(color::LightYellow),
+                SetAttribute(Attribute::Reset),
+                SetForegroundColor(Color::Yellow),
                 line,
-                Fg(color::Reset),
+                SetForegroundColor(Color::Reset)
             );
             for line in wrap_line(line, self.width as usize) {
                 self.print_line(line);
@@ -311,7 +310,8 @@ impl UserInterface for SplitScreen {
     }
 
     fn reset(&mut self) -> Result<()> {
-        write!(self.screen, "{}{}", termion::clear::All, ResetScrollRegion)?;
+        self.screen.queue(Clear(ClearType::All))?;
+        write!(self.screen, "{}", ResetScrollRegion)?;
         Ok(())
     }
 
@@ -340,20 +340,20 @@ impl UserInterface for SplitScreen {
             for i in 0..output_range {
                 let index = output_start_index + i as usize;
                 let line_no = self.output_start_line + i;
+                self.screen.queue(cursor::MoveTo(0, line_no - 1))?;
+                self.screen.queue(Clear(ClearType::CurrentLine))?;
                 write!(
                     self.screen,
-                    "{}{}{}",
-                    termion::cursor::Goto(1, line_no),
-                    termion::clear::CurrentLine,
+                    "{}",
                     self.history.inner[index],
                 )?;
             }
         } else {
             for line in &self.history.inner {
+                self.screen.queue(cursor::MoveTo(0, self.output_line - 1))?;
                 write!(
                     self.screen,
-                    "{}\n{}",
-                    termion::cursor::Goto(1, self.output_line),
+                    "\n{}",
                     line,
                 )?;
             }
@@ -486,7 +486,7 @@ impl UserInterface for SplitScreen {
     fn set_status_line(&mut self, line: usize, info: String) -> Result<()> {
         self.status_area.set_status_line(line, info);
         self.status_area.redraw_line(&mut self.screen, line)?;
-        write!(self.screen, "{}", self.goto_prompt())?;
+        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1))?;
         Ok(())
     }
 
@@ -510,7 +510,7 @@ impl UserInterface for SplitScreen {
 
 impl SplitScreen {
     pub fn new(screen: Box<dyn Write>, history: History) -> Result<Self> {
-        let (width, height) = termion::terminal_size()?;
+        let (width, height) = size()?;
 
         let output_start_line = 2;
         let status_area_height = 1;
@@ -543,52 +543,41 @@ impl SplitScreen {
     fn print_line(&mut self, line: &str) {
         self.history.append(line);
         if self.scroll_data.not_scrolled_or_split() {
+            self.screen.queue(cursor::MoveTo(0, self.output_line - 1)).unwrap();
             write!(
                 self.screen,
-                "{}\r\n{}{}",
-                termion::cursor::Goto(1, self.output_line),
+                "\r\n{}",
                 &line,
-                self.goto_prompt(),
-            )
-            .unwrap();
+            ).unwrap();
+            self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
         }
     }
 
     fn clear_prompt(&mut self) {
-        write!(
-            self.screen,
-            "{}{}{}",
-            termion::cursor::Goto(1, self.mud_prompt_line),
-            termion::clear::CurrentLine,
-            self.goto_prompt(),
-        )
-        .unwrap();
+        self.screen.queue(cursor::MoveTo(0, self.mud_prompt_line - 1)).unwrap();
+        self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
+        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
     }
 
     fn redraw_prompt(&mut self) {
         let prompt_line = self.mud_prompt.print_line().unwrap_or("");
         if self.scroll_data.not_scrolled_or_split() {
+            self.screen.queue(cursor::MoveTo(0, self.mud_prompt_line - 1)).unwrap();
+            self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
             write!(
                 self.screen,
-                "{}{}{}{}",
-                termion::cursor::Goto(1, self.mud_prompt_line),
-                termion::clear::CurrentLine,
+                "{}",
                 prompt_line,
-                self.goto_prompt(),
-            )
-            .unwrap();
+            ).unwrap();
+            self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
         }
     }
 
     fn redraw_top_bar(&mut self) -> Result<()> {
         if self.output_start_line > 1 {
-            write!(
-                self.screen,
-                "{}{}{}",
-                termion::cursor::Goto(1, 1),
-                termion::clear::CurrentLine,
-                Fg(color::Green),
-            )?;
+            self.screen.queue(cursor::MoveTo(0, 0))?;
+            self.screen.queue(Clear(ClearType::CurrentLine))?;
+            self.screen.queue(SetForegroundColor(Color::Green))?;
             let host = if let Some(connection) = &self.connection {
                 format!("═ {connection} ")
             } else {
@@ -606,7 +595,8 @@ impl SplitScreen {
                 output.push(' ');
             }
             write!(self.screen, "{:═<1$}", output, self.width as usize)?; // Print separator
-            write!(self.screen, "{}{}", Fg(color::Reset), self.goto_prompt(),)?;
+            self.screen.queue(SetForegroundColor(Color::Reset))?;
+            self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1))?;
         }
         Ok(())
     }
@@ -615,15 +605,8 @@ impl SplitScreen {
         self.status_area.set_width(self.width);
         self.status_area.update_pos(self.mud_prompt_line + 1);
         self.status_area.redraw(&mut self.screen)?;
-        write!(self.screen, "{}", self.goto_prompt(),)?;
+        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1))?;
         Ok(())
-    }
-
-    fn goto_prompt(&self) -> String {
-        format!(
-            "{}",
-            termion::cursor::Goto(self.cursor_prompt_pos, self.prompt_line),
-        )
     }
 
     fn init_scroll(&mut self) -> Result<()> {
@@ -638,15 +621,15 @@ impl SplitScreen {
                 ScrollRegion(scroll_range + 3, self.output_line),
                 DisableOriginMode
             )?;
+            self.screen.queue(cursor::MoveTo(0, scroll_range + self.output_start_line - 1))?;
+            self.screen.queue(SetForegroundColor(Color::Green))?;
             write!(
                 self.screen,
-                "{}{}{:━<4$}{}",
-                cursor::Goto(1, scroll_range + self.output_start_line),
-                color::Fg(color::Green),
+                "{:━<1$}",
                 "━ (scroll) ",
-                color::Fg(color::Reset),
                 self.width as usize
             )?;
+            self.screen.queue(SetForegroundColor(Color::Reset))?;
         } else {
             self.status_area.set_scroll_marker(true);
             self.status_area.redraw_line(&mut self.screen, 0)?;
@@ -662,24 +645,17 @@ impl SplitScreen {
             let line_no = self.output_start_line + i;
             let mut line = self.history.inner[index].clone();
             if let Some(pattern) = &self.scroll_data.hilite {
+                // Highlight search matches with light white text on blue background
+                let highlight = format!("{}{}$0{}{}", ansi_fg(Color::White), ansi_bg(Color::Blue), ansi_bg(Color::Reset), ansi_fg(Color::Reset));
                 line = pattern
-                    .replace_all(
-                        &line,
-                        format!(
-                            "{}{}$0{}{}",
-                            Fg(color::LightWhite),
-                            Bg(color::Blue),
-                            Bg(color::Reset),
-                            Fg(color::Reset)
-                        ),
-                    )
+                    .replace_all(&line, &highlight)
                     .to_string();
             }
+            self.screen.queue(cursor::MoveTo(0, line_no - 1))?;
+            self.screen.queue(Clear(ClearType::CurrentLine))?;
             write!(
                 self.screen,
-                "{}{}{}",
-                termion::cursor::Goto(1, line_no),
-                termion::clear::CurrentLine,
+                "{}",
                 line,
             )?;
         }

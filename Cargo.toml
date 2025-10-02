@@ -19,7 +19,7 @@ spellcheck = ["hunspell-rs", "hunspell-sys"]
 
 [dependencies]
 libmudtelnet = "2.0.1"
-termion = "4"
+crossterm = { path = "../crossterm" }
 log = "0.4.28"
 simple-logging = "2.0.2"
 chrono = "0.4.42"

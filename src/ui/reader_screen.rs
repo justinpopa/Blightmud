@@ -1,9 +1,10 @@
 use std::io::Write;
 
 use anyhow::Result;
-use termion::{
-    clear,
-    cursor::{self, Goto},
+use crossterm::{
+    cursor,
+    terminal::{size, Clear, ClearType},
+    QueueableCommand,
 };
 
 use crate::{
@@ -31,7 +32,7 @@ pub struct ReaderScreen {
 
 impl ReaderScreen {
     pub fn new(screen: Box<dyn Write>, history: History) -> Result<Self> {
-        let (width, height) = termion::terminal_size()?;
+        let (width, height) = size()?;
         let output_line = height - 1;
         let prompt_line = height;
         let scroll_data = ScrollData::new();
@@ -51,15 +52,12 @@ impl ReaderScreen {
     fn print(&mut self, line: &str, new_line: bool) {
         self.history.append(line);
         if !self.scroll_data.active {
-            write!(
-                self.screen,
-                "{}{}{}{}",
-                Goto(1, self.height - 1),
-                if new_line { "\n" } else { "" },
-                line,
-                Goto(1, self.height)
-            )
-            .unwrap();
+            self.screen.queue(cursor::MoveTo(0, self.height - 2)).unwrap();
+            if new_line {
+                write!(self.screen, "\n").unwrap();
+            }
+            write!(self.screen, "{}", line).unwrap();
+            self.screen.queue(cursor::MoveTo(0, self.height - 1)).unwrap();
         }
     }
 
@@ -68,14 +66,9 @@ impl ReaderScreen {
         if let Some(print_line) = &line.print_line() {
             self.history.append(print_line);
             if !self.scroll_data.active {
-                writeln!(
-                    self.screen,
-                    "{}\n{}{}",
-                    Goto(1, self.height - 1),
-                    print_line,
-                    Goto(1, self.height)
-                )
-                .unwrap();
+                self.screen.queue(cursor::MoveTo(0, self.height - 2)).unwrap();
+                writeln!(self.screen, "\n{}", print_line).unwrap();
+                self.screen.queue(cursor::MoveTo(0, self.height - 1)).unwrap();
             }
         }
     }
@@ -98,52 +91,33 @@ impl ReaderScreen {
                 input = input.split_at(i).0;
             }
         }
-        write!(
-            self.screen,
-            "{}{}{}{}",
-            Goto(1, self.prompt_line),
-            clear::CurrentLine,
-            input,
-            Goto(pos as u16 + 1, self.prompt_line)
-        )
-        .unwrap();
+        self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1)).unwrap();
+        self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
+        write!(self.screen, "{}", input).unwrap();
+        self.screen.queue(cursor::MoveTo(pos as u16, self.prompt_line - 1)).unwrap();
     }
 
     #[inline]
     fn print_prompt_input_suffix(&mut self, line: &str, start: usize, end: usize) {
-        write!(
-            self.screen,
-            "{}{}{}",
-            Goto(start as u16 + 1, self.prompt_line),
-            line,
-            Goto(end as u16 + 1, self.prompt_line)
-        )
-        .unwrap();
+        self.screen.queue(cursor::MoveTo(start as u16, self.prompt_line - 1)).unwrap();
+        write!(self.screen, "{}", line).unwrap();
+        self.screen.queue(cursor::MoveTo(end as u16, self.prompt_line - 1)).unwrap();
     }
 
     #[inline]
     fn trim_prompt_input(&mut self, pos: usize) {
-        write!(
-            self.screen,
-            "{}{}",
-            Goto(pos as u16 + 1, self.prompt_line),
-            clear::AfterCursor,
-        )
-        .unwrap();
+        self.screen.queue(cursor::MoveTo(pos as u16, self.prompt_line - 1)).unwrap();
+        self.screen.queue(Clear(ClearType::UntilNewLine)).unwrap();
     }
 
     fn draw_scroll(&mut self) -> Result<()> {
         for i in 0..self.height - 1 {
             let index = self.scroll_data.pos + i as usize;
             let line = self.history.inner[index].clone();
-            write!(
-                self.screen,
-                "{}{}{}{}",
-                termion::cursor::Goto(1, i + 1),
-                termion::clear::CurrentLine,
-                line,
-                cursor::Goto(1, self.prompt_line),
-            )?;
+            self.screen.queue(cursor::MoveTo(0, i))?;
+            self.screen.queue(Clear(ClearType::CurrentLine))?;
+            write!(self.screen, "{}", line)?;
+            self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1))?;
         }
         Ok(())
     }
@@ -152,7 +126,7 @@ impl ReaderScreen {
 impl UserInterface for ReaderScreen {
     fn setup(&mut self) -> Result<()> {
         self.reset()?;
-        let (width, height) = termion::terminal_size()?;
+        let (width, height) = size()?;
         if width > 0 && height > 0 {
             self.output_line = height - 1;
             self.prompt_line = height;
@@ -160,11 +134,11 @@ impl UserInterface for ReaderScreen {
             self.height = height;
             write!(
                 self.screen,
-                "{}{}{}",
+                "{}{}",
                 ScrollRegion(1, self.output_line),
                 DisableOriginMode,
-                cursor::Goto(1, self.prompt_line),
             )?;
+            self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1))?;
             self.reset_scroll()?;
             self.screen.flush()?;
             Ok(())
@@ -256,7 +230,8 @@ impl UserInterface for ReaderScreen {
     }
 
     fn reset(&mut self) -> Result<()> {
-        write!(self.screen, "{}{}", termion::clear::All, ResetScrollRegion)?;
+        self.screen.queue(Clear(ClearType::All))?;
+        write!(self.screen, "{}", ResetScrollRegion)?;
         Ok(())
     }
 
@@ -268,25 +243,17 @@ impl UserInterface for ReaderScreen {
             let output_start_index = output_start_index as usize;
             for i in 0..output_range {
                 let index = output_start_index + i as usize;
-                write!(
-                    self.screen,
-                    "{}{}{}{}",
-                    cursor::Goto(1, 1 + i),
-                    clear::AfterCursor,
-                    self.history.inner[index],
-                    cursor::Goto(1, self.prompt_line),
-                )?;
+                self.screen.queue(cursor::MoveTo(0, i))?;
+                self.screen.queue(Clear(ClearType::UntilNewLine))?;
+                write!(self.screen, "{}", self.history.inner[index])?;
+                self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1))?;
             }
         } else {
             for line in &self.history.inner {
-                write!(
-                    self.screen,
-                    "{}\n{}{}{}",
-                    Goto(1, self.output_line),
-                    clear::AfterCursor,
-                    line,
-                    cursor::Goto(1, self.prompt_line),
-                )?;
+                self.screen.queue(cursor::MoveTo(0, self.output_line - 1))?;
+                write!(self.screen, "\n{}", line)?;
+                self.screen.queue(Clear(ClearType::UntilNewLine))?;
+                self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1))?;
             }
         }
         Ok(())
