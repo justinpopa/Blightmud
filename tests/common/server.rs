@@ -7,6 +7,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
+    time::Duration,
 };
 
 #[derive(Default)]
@@ -19,6 +20,7 @@ pub struct Connection {
 impl Connection {
     pub fn recv(&mut self) -> Vec<u8> {
         if let Some(stream) = self.stream.as_mut() {
+            stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
             let mut buffer = vec![0u8; 1024];
             if let Ok(count) = stream.read(&mut buffer) {
                 buffer[..count].to_vec()
@@ -32,6 +34,7 @@ impl Connection {
 
     pub fn read(&mut self, len: usize) -> Vec<u8> {
         if let Some(stream) = self.stream.as_mut() {
+            stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
             let mut buffer = vec![0u8; len];
             if let Ok(_) = stream.read(&mut buffer) {
                 buffer
@@ -83,7 +86,7 @@ pub struct Server {
 impl Server {
     pub fn bind(port: u16) -> Self {
         let (tx, rx): (Sender<Connection>, Receiver<Connection>) = channel();
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).unwrap();
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
         let local_addr = listener.local_addr().unwrap();
         spawn_listener_thread(tx, listener);
         Self {
