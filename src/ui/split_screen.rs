@@ -6,14 +6,14 @@ use crate::io::SaveData;
 use crate::model::{Settings, HIDE_TOPBAR};
 use crate::{model::Line, model::Regex, ui::ansi::*, ui::printable_chars::PrintableCharsIterator};
 use anyhow::Result;
-use std::collections::HashSet;
-use std::io::Write;
 use crossterm::{
     cursor,
     style::{Attribute, Color, Colored, SetAttribute, SetBackgroundColor, SetForegroundColor},
     terminal::{size, Clear, ClearType},
     QueueableCommand,
 };
+use std::collections::HashSet;
+use std::io::Write;
 
 use super::UserInterface;
 
@@ -211,7 +211,8 @@ impl UserInterface for SplitScreen {
             self.reset_scroll()?;
             self.redraw_status_area()?;
             self.screen.flush()?;
-            self.screen.queue(cursor::MoveTo(0, self.output_start_line - 1))?;
+            self.screen
+                .queue(cursor::MoveTo(0, self.output_start_line - 1))?;
             self.screen.queue(cursor::SavePosition)?;
             Ok(())
         } else {
@@ -281,14 +282,21 @@ impl UserInterface for SplitScreen {
         }
         self.cursor_prompt_pos = pos as u16 + 1;
         self.screen.queue(cursor::SavePosition).unwrap();
-        self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(0, self.prompt_line - 1))
+            .unwrap();
         self.screen.queue(SetForegroundColor(Color::Reset)).unwrap();
         self.screen.queue(SetBackgroundColor(Color::Reset)).unwrap();
         self.screen.queue(SetAttribute(Attribute::Reset)).unwrap();
         self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
         write!(self.screen, "{}", input).unwrap();
         self.screen.queue(cursor::RestorePosition).unwrap();
-        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(
+                self.cursor_prompt_pos - 1,
+                self.prompt_line - 1,
+            ))
+            .unwrap();
     }
 
     fn print_send(&mut self, send: &Line) {
@@ -342,20 +350,12 @@ impl UserInterface for SplitScreen {
                 let line_no = self.output_start_line + i;
                 self.screen.queue(cursor::MoveTo(0, line_no - 1))?;
                 self.screen.queue(Clear(ClearType::CurrentLine))?;
-                write!(
-                    self.screen,
-                    "{}",
-                    self.history.inner[index],
-                )?;
+                write!(self.screen, "{}", self.history.inner[index],)?;
             }
         } else {
             for line in &self.history.inner {
                 self.screen.queue(cursor::MoveTo(0, self.output_line - 1))?;
-                write!(
-                    self.screen,
-                    "\n{}",
-                    line,
-                )?;
+                write!(self.screen, "\n{}", line,)?;
             }
         }
         Ok(())
@@ -486,7 +486,10 @@ impl UserInterface for SplitScreen {
     fn set_status_line(&mut self, line: usize, info: String) -> Result<()> {
         self.status_area.set_status_line(line, info);
         self.status_area.redraw_line(&mut self.screen, line)?;
-        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1))?;
+        self.screen.queue(cursor::MoveTo(
+            self.cursor_prompt_pos - 1,
+            self.prompt_line - 1,
+        ))?;
         Ok(())
     }
 
@@ -543,33 +546,46 @@ impl SplitScreen {
     fn print_line(&mut self, line: &str) {
         self.history.append(line);
         if self.scroll_data.not_scrolled_or_split() {
-            self.screen.queue(cursor::MoveTo(0, self.output_line - 1)).unwrap();
-            write!(
-                self.screen,
-                "\r\n{}",
-                &line,
-            ).unwrap();
-            self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
+            self.screen
+                .queue(cursor::MoveTo(0, self.output_line - 1))
+                .unwrap();
+            write!(self.screen, "\r\n{}", &line,).unwrap();
+            self.screen
+                .queue(cursor::MoveTo(
+                    self.cursor_prompt_pos - 1,
+                    self.prompt_line - 1,
+                ))
+                .unwrap();
         }
     }
 
     fn clear_prompt(&mut self) {
-        self.screen.queue(cursor::MoveTo(0, self.mud_prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(0, self.mud_prompt_line - 1))
+            .unwrap();
         self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
-        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(
+                self.cursor_prompt_pos - 1,
+                self.prompt_line - 1,
+            ))
+            .unwrap();
     }
 
     fn redraw_prompt(&mut self) {
         let prompt_line = self.mud_prompt.print_line().unwrap_or("");
         if self.scroll_data.not_scrolled_or_split() {
-            self.screen.queue(cursor::MoveTo(0, self.mud_prompt_line - 1)).unwrap();
+            self.screen
+                .queue(cursor::MoveTo(0, self.mud_prompt_line - 1))
+                .unwrap();
             self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
-            write!(
-                self.screen,
-                "{}",
-                prompt_line,
-            ).unwrap();
-            self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1)).unwrap();
+            write!(self.screen, "{}", prompt_line,).unwrap();
+            self.screen
+                .queue(cursor::MoveTo(
+                    self.cursor_prompt_pos - 1,
+                    self.prompt_line - 1,
+                ))
+                .unwrap();
         }
     }
 
@@ -596,7 +612,10 @@ impl SplitScreen {
             }
             write!(self.screen, "{:═<1$}", output, self.width as usize)?; // Print separator
             self.screen.queue(SetForegroundColor(Color::Reset))?;
-            self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1))?;
+            self.screen.queue(cursor::MoveTo(
+                self.cursor_prompt_pos - 1,
+                self.prompt_line - 1,
+            ))?;
         }
         Ok(())
     }
@@ -605,7 +624,10 @@ impl SplitScreen {
         self.status_area.set_width(self.width);
         self.status_area.update_pos(self.mud_prompt_line + 1);
         self.status_area.redraw(&mut self.screen)?;
-        self.screen.queue(cursor::MoveTo(self.cursor_prompt_pos - 1, self.prompt_line - 1))?;
+        self.screen.queue(cursor::MoveTo(
+            self.cursor_prompt_pos - 1,
+            self.prompt_line - 1,
+        ))?;
         Ok(())
     }
 
@@ -621,14 +643,10 @@ impl SplitScreen {
                 ScrollRegion(scroll_range + 3, self.output_line),
                 DisableOriginMode
             )?;
-            self.screen.queue(cursor::MoveTo(0, scroll_range + self.output_start_line - 1))?;
+            self.screen
+                .queue(cursor::MoveTo(0, scroll_range + self.output_start_line - 1))?;
             self.screen.queue(SetForegroundColor(Color::Green))?;
-            write!(
-                self.screen,
-                "{:━<1$}",
-                "━ (scroll) ",
-                self.width as usize
-            )?;
+            write!(self.screen, "{:━<1$}", "━ (scroll) ", self.width as usize)?;
             self.screen.queue(SetForegroundColor(Color::Reset))?;
         } else {
             self.status_area.set_scroll_marker(true);
@@ -646,18 +664,18 @@ impl SplitScreen {
             let mut line = self.history.inner[index].clone();
             if let Some(pattern) = &self.scroll_data.hilite {
                 // Highlight search matches with light white text on blue background
-                let highlight = format!("{}{}$0{}{}", ansi_fg(Color::White), ansi_bg(Color::Blue), ansi_bg(Color::Reset), ansi_fg(Color::Reset));
-                line = pattern
-                    .replace_all(&line, &highlight)
-                    .to_string();
+                let highlight = format!(
+                    "{}{}$0{}{}",
+                    ansi_fg(Color::White),
+                    ansi_bg(Color::Blue),
+                    ansi_bg(Color::Reset),
+                    ansi_fg(Color::Reset)
+                );
+                line = pattern.replace_all(&line, &highlight).to_string();
             }
             self.screen.queue(cursor::MoveTo(0, line_no - 1))?;
             self.screen.queue(Clear(ClearType::CurrentLine))?;
-            write!(
-                self.screen,
-                "{}",
-                line,
-            )?;
+            write!(self.screen, "{}", line,)?;
         }
         Ok(())
     }

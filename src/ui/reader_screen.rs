@@ -52,12 +52,16 @@ impl ReaderScreen {
     fn print(&mut self, line: &str, new_line: bool) {
         self.history.append(line);
         if !self.scroll_data.active {
-            self.screen.queue(cursor::MoveTo(0, self.height - 2)).unwrap();
+            self.screen
+                .queue(cursor::MoveTo(0, self.height - 2))
+                .unwrap();
             if new_line {
                 write!(self.screen, "\n").unwrap();
             }
             write!(self.screen, "{}", line).unwrap();
-            self.screen.queue(cursor::MoveTo(0, self.height - 1)).unwrap();
+            self.screen
+                .queue(cursor::MoveTo(0, self.height - 1))
+                .unwrap();
         }
     }
 
@@ -66,9 +70,13 @@ impl ReaderScreen {
         if let Some(print_line) = &line.print_line() {
             self.history.append(print_line);
             if !self.scroll_data.active {
-                self.screen.queue(cursor::MoveTo(0, self.height - 2)).unwrap();
+                self.screen
+                    .queue(cursor::MoveTo(0, self.height - 2))
+                    .unwrap();
                 writeln!(self.screen, "\n{}", print_line).unwrap();
-                self.screen.queue(cursor::MoveTo(0, self.height - 1)).unwrap();
+                self.screen
+                    .queue(cursor::MoveTo(0, self.height - 1))
+                    .unwrap();
             }
         }
     }
@@ -91,22 +99,32 @@ impl ReaderScreen {
                 input = input.split_at(i).0;
             }
         }
-        self.screen.queue(cursor::MoveTo(0, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(0, self.prompt_line - 1))
+            .unwrap();
         self.screen.queue(Clear(ClearType::CurrentLine)).unwrap();
         write!(self.screen, "{}", input).unwrap();
-        self.screen.queue(cursor::MoveTo(pos as u16, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(pos as u16, self.prompt_line - 1))
+            .unwrap();
     }
 
     #[inline]
     fn print_prompt_input_suffix(&mut self, line: &str, start: usize, end: usize) {
-        self.screen.queue(cursor::MoveTo(start as u16, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(start as u16, self.prompt_line - 1))
+            .unwrap();
         write!(self.screen, "{}", line).unwrap();
-        self.screen.queue(cursor::MoveTo(end as u16, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(end as u16, self.prompt_line - 1))
+            .unwrap();
     }
 
     #[inline]
     fn trim_prompt_input(&mut self, pos: usize) {
-        self.screen.queue(cursor::MoveTo(pos as u16, self.prompt_line - 1)).unwrap();
+        self.screen
+            .queue(cursor::MoveTo(pos as u16, self.prompt_line - 1))
+            .unwrap();
         self.screen.queue(Clear(ClearType::UntilNewLine)).unwrap();
     }
 

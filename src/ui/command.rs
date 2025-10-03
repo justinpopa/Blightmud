@@ -2,12 +2,15 @@ use crate::event::QuitMethod;
 use crate::model::{Completions, Line, PromptMask, Servers};
 use crate::tts::TTSController;
 use crate::{lua::LuaScript, lua::UiEvent, session::Session, SaveData};
+use crossterm::event::{
+    self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent,
+    MouseEventKind,
+};
 use log::debug;
 use rs_complete::CompletionTree;
 use std::collections::HashSet;
-use std::thread;
 use std::sync::{mpsc::Sender, Arc, Mutex};
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
+use std::thread;
 
 #[derive(Default)]
 struct CompletionStepData {
@@ -290,7 +293,9 @@ fn parse_key_event(
             writer.send(crate::event::Event::Redraw).unwrap()
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            writer.send(crate::event::Event::Quit(QuitMethod::CtrlC)).unwrap();
+            writer
+                .send(crate::event::Event::Quit(QuitMethod::CtrlC))
+                .unwrap();
         }
 
         // Generic character input (no modifiers or handled by bindings)
@@ -336,7 +341,9 @@ fn check_command_binds(
                 script.check_bindings(&human_key("alt-", c))
             }
             (KeyCode::F(n), _) => script.check_bindings(&format!("f{n}")),
-            (KeyCode::PageUp, _) => script.check_bindings("pageup") || script.check_bindings("page up"),
+            (KeyCode::PageUp, _) => {
+                script.check_bindings("pageup") || script.check_bindings("page up")
+            }
             (KeyCode::PageDown, _) => {
                 script.check_bindings("pagedown") || script.check_bindings("page down")
             }
@@ -345,36 +352,96 @@ fn check_command_binds(
             (KeyCode::Up, _) => script.check_bindings("up"),
             (KeyCode::Down, _) => script.check_bindings("down"),
             // DECKPAM keypad keys with modifiers
-            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_0"),
-            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_1"),
-            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_2"),
-            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_3"),
-            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_4"),
-            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_5"),
-            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_6"),
-            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_7"),
-            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_8"),
-            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::SHIFT) => script.check_bindings("shift-kp_9"),
-            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_0"),
-            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_1"),
-            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_2"),
-            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_3"),
-            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_4"),
-            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_5"),
-            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_6"),
-            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_7"),
-            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_8"),
-            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::CONTROL) => script.check_bindings("ctrl-kp_9"),
-            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_0"),
-            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_1"),
-            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_2"),
-            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_3"),
-            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_4"),
-            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_5"),
-            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_6"),
-            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_7"),
-            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_8"),
-            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::ALT) => script.check_bindings("alt-kp_9"),
+            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_0")
+            }
+            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_1")
+            }
+            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_2")
+            }
+            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_3")
+            }
+            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_4")
+            }
+            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_5")
+            }
+            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_6")
+            }
+            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_7")
+            }
+            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_8")
+            }
+            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::SHIFT) => {
+                script.check_bindings("shift-kp_9")
+            }
+            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_0")
+            }
+            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_1")
+            }
+            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_2")
+            }
+            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_3")
+            }
+            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_4")
+            }
+            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_5")
+            }
+            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_6")
+            }
+            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_7")
+            }
+            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_8")
+            }
+            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::CONTROL) => {
+                script.check_bindings("ctrl-kp_9")
+            }
+            (KeyCode::Keypad0, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_0")
+            }
+            (KeyCode::Keypad1, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_1")
+            }
+            (KeyCode::Keypad2, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_2")
+            }
+            (KeyCode::Keypad3, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_3")
+            }
+            (KeyCode::Keypad4, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_4")
+            }
+            (KeyCode::Keypad5, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_5")
+            }
+            (KeyCode::Keypad6, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_6")
+            }
+            (KeyCode::Keypad7, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_7")
+            }
+            (KeyCode::Keypad8, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_8")
+            }
+            (KeyCode::Keypad9, m) if m.contains(KeyModifiers::ALT) => {
+                script.check_bindings("alt-kp_9")
+            }
             // Unmodified keypad keys
             (KeyCode::Keypad0, _) => script.check_bindings("kp_0"),
             (KeyCode::Keypad1, _) => script.check_bindings("kp_1"),
@@ -441,7 +508,9 @@ fn handle_script_ui_io(
         });
         script.set_prompt_content(buffer.get_buffer(), buffer.get_pos());
         script.get_output_lines().iter().for_each(|l| {
-            writer.send(crate::event::Event::Output(Line::from(l))).unwrap();
+            writer
+                .send(crate::event::Event::Output(Line::from(l)))
+                .unwrap();
         });
     }
 }
@@ -476,7 +545,8 @@ pub fn spawn_input_thread(session: Session) -> thread::JoinHandle<()> {
                             if let Ok(mut buffer) = buffer.lock() {
                                 let orig_pos = buffer.get_pos();
                                 let orig_len = buffer.buffer.len();
-                                let bind_ran = check_command_binds(key, &mut buffer, &script, &writer);
+                                let bind_ran =
+                                    check_command_binds(key, &mut buffer, &script, &writer);
                                 if !bind_ran {
                                     parse_key_event(
                                         key,
@@ -488,13 +558,17 @@ pub fn spawn_input_thread(session: Session) -> thread::JoinHandle<()> {
                                 }
                                 if orig_len == buffer.buffer.len() && orig_pos != buffer.get_pos() {
                                     writer
-                                        .send(crate::event::Event::UserInputCursor(buffer.get_pos()))
+                                        .send(crate::event::Event::UserInputCursor(
+                                            buffer.get_pos(),
+                                        ))
                                         .unwrap();
                                 } else if !bind_ran || orig_len != buffer.buffer.len() {
                                     if let Ok(mut luascript) = script.lock() {
                                         luascript.set_prompt_mask_content(&buffer.prompt_mask);
-                                        luascript
-                                            .set_prompt_content(buffer.get_buffer(), buffer.get_pos());
+                                        luascript.set_prompt_content(
+                                            buffer.get_buffer(),
+                                            buffer.get_pos(),
+                                        );
                                     }
                                     writer
                                         .send(crate::event::Event::UserInputBuffer(
@@ -528,9 +602,9 @@ mod command_test {
 
     use super::check_command_binds;
     use super::CommandBuffer;
+    use crate::event::Event;
     use crate::lua::LuaScriptBuilder;
     use crate::tts::TTSController;
-    use crate::event::Event;
 
     fn push_string(buffer: &mut CommandBuffer, msg: &str) {
         msg.chars().for_each(|c| buffer.push_key(c));
@@ -826,9 +900,24 @@ mod command_test {
             &tx
         ));
 
-        assert!(check_command_binds(key_event(KeyCode::Home, KeyModifiers::NONE), &mut buffer, &script, &tx));
-        assert!(check_command_binds(key_event(KeyCode::End, KeyModifiers::NONE), &mut buffer, &script, &tx));
-        assert!(check_command_binds(key_event(KeyCode::PageUp, KeyModifiers::NONE), &mut buffer, &script, &tx));
+        assert!(check_command_binds(
+            key_event(KeyCode::Home, KeyModifiers::NONE),
+            &mut buffer,
+            &script,
+            &tx
+        ));
+        assert!(check_command_binds(
+            key_event(KeyCode::End, KeyModifiers::NONE),
+            &mut buffer,
+            &script,
+            &tx
+        ));
+        assert!(check_command_binds(
+            key_event(KeyCode::PageUp, KeyModifiers::NONE),
+            &mut buffer,
+            &script,
+            &tx
+        ));
         assert!(check_command_binds(
             key_event(KeyCode::PageDown, KeyModifiers::NONE),
             &mut buffer,

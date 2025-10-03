@@ -13,9 +13,9 @@ use crate::{
 use super::{history::History, HeadlessScreen, ReaderScreen, SplitScreen, UserInterface};
 use anyhow::Result;
 use crossterm::{
-    terminal::{enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    event::{EnableMouseCapture, DisableMouseCapture},
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
 /// Creates the io::Write terminal handler we draw to.
@@ -191,11 +191,7 @@ impl UserInterface for UiWrapper {
     fn destroy(self: Box<Self>) -> Result<(Box<dyn Write>, History)> {
         // Cleanup crossterm state before destroying
         let _ = disable_raw_mode();
-        let _ = execute!(
-            std::io::stdout(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        );
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         self.screen.destroy()
     }
 }
