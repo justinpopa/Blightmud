@@ -32,7 +32,7 @@ mud.add_output_listener(function (line)
 end)
 
 mud.on_connect(function (host)
-    assert(host == "0.0.0.0")
+    assert(host == "127.0.0.1")
     pop_stack()
 end)
 
