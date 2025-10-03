@@ -15,11 +15,11 @@ crate-type = ["rlib"]
 [features]
 default = ["spellcheck"]
 text-to-speech = ["tts"]
-spellcheck = ["hunspell-rs", "hunspell-sys"]
+spellcheck = ["zspell"]
 
 [dependencies]
 libmudtelnet = "2.0.1"
-crossterm = { path = "../crossterm" }
+crossterm = { git = "https://github.com/justinpopa/crossterm", branch = "dev" }
 log = "0.4.28"
 simple-logging = "2.0.2"
 chrono = "0.4.42"
@@ -44,8 +44,7 @@ serde_json = "1.0.145"
 git2 = "0.20.1"
 rodio = "0.21.1"
 notify-debouncer-mini = "0.6.0"
-hunspell-rs = { version = "0.4.0", optional = true }
-hunspell-sys = { version = "0.3.0", features = ['bundled'], optional = true }
+zspell = { version = "0.5", optional = true, features = ["unstable-suggestions"] }
 rustls = { version = "0.23", default-features = false, features = ['ring', 'tls12', 'std'] }
 webpki-roots = "1.0"
 reqwest = { version = "0.12.23", default-features = false, features = ['blocking', '__rustls-ring', 'json'] }
@@ -56,11 +55,6 @@ mockall = "0.13.1"
 mockall_double = "0.3.1"
 rustls-pemfile = "2.2"
 env_logger = "0.11.6"
-
-[profile.dev.package.hunspell-sys]
-# fixes debug profile build errs from warnings of the form:
-#   warning _FORTIFY_SOURCE requires compiling with optimization (-O)
-opt-level = 3
 
 [package.metadata.rpm]
 package = "blightmud"

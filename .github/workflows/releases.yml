@@ -115,3 +115,31 @@ jobs:
         with:
           name: blightmud-macos-13
           path: target/release/blightmud-${{ steps.get_version.outputs.VERSION }}-macos-13.zip
+
+  build_windows_latest:
+    name: Build for Windows-latest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build release
+        run: cargo build --release --locked --all-features
+      - name: Get current version
+        id: get_version
+        run: echo "VERSION=$($env:GITHUB_REF -replace 'refs/tags/','')" >> $env:GITHUB_OUTPUT
+      - name: Package Binary
+        run: Compress-Archive -Path target/release/blightmud.exe -DestinationPath target/release/blightmud-${{ steps.get_version.outputs.VERSION }}-windows.zip
+      - name: Create/Update release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          draft: true
+          omitBody: true
+          artifacts: target/release/blightmud-${{ steps.get_version.outputs.VERSION }}-windows.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blightmud-windows
+          path: target/release/blightmud-${{ steps.get_version.outputs.VERSION }}-windows.zip
