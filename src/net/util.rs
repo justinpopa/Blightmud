@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn test_keepalive_disable() {
         // Start a dummy TCP server on a random port.
-        let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, rx): (Sender<bool>, Receiver<bool>) = channel();
         let server_handle = thread::spawn(move || {

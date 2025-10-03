@@ -41,7 +41,7 @@ impl LogWriter for Logger {
         if self.file.is_none() {
             let path = get_and_ensure_log_dir(host);
 
-            let logfile = path.join(format!("{}.log", Local::now().format("%Y%m%d.%H:%M:%S")));
+            let logfile = path.join(format!("{}.log", Local::now().format("%Y%m%d.%H-%M-%S")));
             self.file = Some(BufWriter::new(StripWriter::new(File::create(logfile)?)));
         }
         Ok(())

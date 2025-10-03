@@ -100,20 +100,33 @@ mod test_plugin {
     #[test]
     fn test_dir() {
         let lua = get_lua_state();
-        assert!(lua
-            .load("return plugin.dir()")
-            .call::<String>(())
-            .unwrap()
-            .ends_with(".run/test/data/plugins"));
+        let path = lua.load("return plugin.dir()").call::<String>(()).unwrap();
+
+        if cfg!(windows) {
+            assert!(
+                path.ends_with(".run\\test\\data\\plugins")
+                    || path.ends_with(".run/test/data/plugins")
+            );
+        } else {
+            assert!(path.ends_with(".run/test/data/plugins"));
+        }
     }
 
     #[test]
     fn test_named_dir() {
         let lua = get_lua_state();
-        assert!(lua
+        let path = lua
             .load("return plugin.dir(\"awesome\")")
             .call::<String>(())
-            .unwrap()
-            .ends_with(".run/test/data/plugins/awesome"));
+            .unwrap();
+
+        if cfg!(windows) {
+            assert!(
+                path.ends_with(".run\\test\\data\\plugins\\awesome")
+                    || path.ends_with(".run/test/data/plugins/awesome")
+            );
+        } else {
+            assert!(path.ends_with(".run/test/data/plugins/awesome"));
+        }
     }
 }

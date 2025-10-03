@@ -20,16 +20,30 @@ mod util_tests {
 
     #[test]
     fn homedir_expansion() {
-        env::set_var("HOME", "/home/what");
-        assert_eq!("/home/what/blightmud", expand_tilde("~/blightmud"));
+        if cfg!(windows) {
+            env::set_var("USERPROFILE", "C:\\Users\\what");
+            assert_eq!("C:\\Users\\what/blightmud", expand_tilde("~/blightmud"));
 
-        env::set_var("HOME", "/Users/cindi");
-        assert_eq!(
-            "/Users/cindi/blightmud/data",
-            expand_tilde("~/blightmud/data")
-        );
+            env::set_var("USERPROFILE", "C:\\Users\\cindi");
+            assert_eq!(
+                "C:\\Users\\cindi/blightmud/data",
+                expand_tilde("~/blightmud/data")
+            );
 
-        assert_eq!("/leave/it/alone", expand_tilde("/leave/it/alone"));
-        assert_eq!("/leave/~/alone", expand_tilde("/leave/~/alone"));
+            assert_eq!("C:/leave/it/alone", expand_tilde("C:/leave/it/alone"));
+            assert_eq!("C:/leave/~/alone", expand_tilde("C:/leave/~/alone"));
+        } else {
+            env::set_var("HOME", "/home/what");
+            assert_eq!("/home/what/blightmud", expand_tilde("~/blightmud"));
+
+            env::set_var("HOME", "/Users/cindi");
+            assert_eq!(
+                "/Users/cindi/blightmud/data",
+                expand_tilde("~/blightmud/data")
+            );
+
+            assert_eq!("/leave/it/alone", expand_tilde("/leave/it/alone"));
+            assert_eq!("/leave/~/alone", expand_tilde("/leave/~/alone"));
+        }
     }
 }
