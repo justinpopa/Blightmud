@@ -99,34 +99,41 @@ mod test_plugin {
 
     #[test]
     fn test_dir() {
-        let lua = get_lua_state();
-        let path = lua.load("return plugin.dir()").call::<String>(()).unwrap();
+        use std::path::Path;
 
-        if cfg!(windows) {
-            assert!(
-                path.ends_with(".run\\test\\data\\plugins")
-                    || path.ends_with(".run/test/data/plugins")
-            );
-        } else {
-            assert!(path.ends_with(".run/test/data/plugins"));
-        }
+        let lua = get_lua_state();
+        let path_str = lua.load("return plugin.dir()").call::<String>(()).unwrap();
+        let path = Path::new(&path_str);
+
+        // Check that the path ends with the expected components
+        let components: Vec<_> = path.components().collect();
+        let len = components.len();
+        assert!(len >= 4);
+        assert_eq!(components[len - 1].as_os_str(), "plugins");
+        assert_eq!(components[len - 2].as_os_str(), "data");
+        assert_eq!(components[len - 3].as_os_str(), "test");
+        assert_eq!(components[len - 4].as_os_str(), ".run");
     }
 
     #[test]
     fn test_named_dir() {
+        use std::path::Path;
+
         let lua = get_lua_state();
-        let path = lua
+        let path_str = lua
             .load("return plugin.dir(\"awesome\")")
             .call::<String>(())
             .unwrap();
+        let path = Path::new(&path_str);
 
-        if cfg!(windows) {
-            assert!(
-                path.ends_with(".run\\test\\data\\plugins\\awesome")
-                    || path.ends_with(".run/test/data/plugins/awesome")
-            );
-        } else {
-            assert!(path.ends_with(".run/test/data/plugins/awesome"));
-        }
+        // Check that the path ends with the expected components
+        let components: Vec<_> = path.components().collect();
+        let len = components.len();
+        assert!(len >= 5);
+        assert_eq!(components[len - 1].as_os_str(), "awesome");
+        assert_eq!(components[len - 2].as_os_str(), "plugins");
+        assert_eq!(components[len - 3].as_os_str(), "data");
+        assert_eq!(components[len - 4].as_os_str(), "test");
+        assert_eq!(components[len - 5].as_os_str(), ".run");
     }
 }
